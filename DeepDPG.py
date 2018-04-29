@@ -17,7 +17,6 @@ class Actor(object):
         self.dq_da        = tf.placeholder("float",[None,self.actionSize])
         self.theta_u      = []
         self.batchSize    = 64
-        self.theta_u_t    = None
         self.learningRate = 1e-4 # Tune this
         self.tau          = 1e-2 # Tune this
         self.actorNetwork()
@@ -84,7 +83,6 @@ class Critic(object):
         self.state_i      = tf.placeholder("float",[None,self.envSize])
         self.action_i     = tf.placeholder("float",[None,self.actionSize])
         self.theta_q      = []
-        self.theta_q_t    = None
         self.learningRate = 1e-3 # Tune this
         self.batchSize    = 64
         self.tau          = 1e-2 # Tune this
@@ -200,13 +198,16 @@ class DDPG(object):
             state_i = self.env.reset()
             state_i = np.reshape(state_i, [1, self.stateSpace])
             done = False
+            print("x"+"-"*10+"Episode {}".format(count+1)+"-"*10+"x")
+            totalReward = 0
             while not done:
                 action_i = actor.getAction(state_i) + noise
                 [state_i2, reward_i, done, garbage] = self.env.step(action_i)
                 if len(self.replay) >= self.maxlenReplay:
                     self.replay.popleft()
                 self.replay.append([state_i,action_i,reward_i,state_i2,done])
-                state_i = np.copy(state_i2)
+                totalReward += reward_i
+                state_i = np.reshape(state_i2, [1, self.stateSpace])
                 if not samplable:
                     if len(self.replay) >= self.batchSize:
                         samplable = True
@@ -219,35 +220,27 @@ class DDPG(object):
                     actionBatch_1 = [experience[1] for experience in batch]
                     actionBatch_1 = np.reshape(actionBatch_1,[len(actionBatch_1),self.actionSpace])
                     rewardBatch = [experience[2] for experience in batch]
-                    rewardBatch = np.reshape(rewardBatch,[len(rewardBatch),1])
                     doneBatch = [experience[-1] for experience in batch]
+                    doneBatch = np.array(doneBatch)
                     actionBatch_2 = actor.getTargetAction(stateBatch_2)
                     actionBatch_2 = np.reshape(actionBatch_2,[len(actionBatch_2),self.actionSpace])
                     actionActual = actor.getAction(stateBatch_1)
                     actionActual = np.reshape(actionActual,[len(actionActual),self.actionSpace])
                     qValue_2 = critic.getTargetQValue(stateBatch_2,actionBatch_2)
-                    yBatch[not doneBatch] = rewardBatch + self.gamma*qValue_2
-                    #yBatch[doneBatch] = rewardBatch
-                    #pdb.set_trace()
+                    qValue_2 = np.reshape(qValue_2,[len(qValue_2)])
+                    yBatch = rewardBatch
+                    yBatch = np.array(yBatch)
+                    yBatch[doneBatch==0] += self.gamma*(qValue_2[doneBatch==0])
+                    yBatch = np.reshape(rewardBatch,[len(yBatch),1])
                     qValue_1 = critic.getQValue(stateBatch_1,actionBatch_1)
                     critic.updateCritic(stateBatch_1,actionBatch_1,yBatch)
                     actor.updateActor(stateBatch_1,critic.getdq_da(stateBatch_1,actionActual)[0])
                     critic.updateTargetCritic()
                     actor.updateTargetActor()                            
             count += 1
+            print("Total reward is {}".format(totalReward))
 
 if __name__ == '__main__':
     environment = 'Walker2d-v2'
     agent = DDPG(environment)
     agent.ddpg()
-
-
-# state_1_batch = []
-# state_2_batch = []
-# action_1_batch = []
-# reward_batch = []
-# for experience in batch:
-    # state_1_batch.append(experience[0])
-    # state_2_batch.append(experience[-1])
-    # action_1_batch.append(experience[1])
-    # reward_batch.append(experience[2])
